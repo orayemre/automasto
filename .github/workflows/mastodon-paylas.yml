@@ -1,4 +1,4 @@
-name: Mastodon Otomatik Paylaşım
+name: Mastodon Oto
 on:
   schedule:
     - cron: '0 8 * * *'  # Her gün saat 8:00'de çalışır
@@ -8,9 +8,6 @@ jobs:
   paylas:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
       - name: Node.js Kur
         uses: actions/setup-node@v4
         with:
@@ -18,25 +15,150 @@ jobs:
           
       - name: Gist'ten Dosyayı İndir
         run: |
+          echo "Gist'ten hikayeler dosyası indiriliyor..."
           curl -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
                -H "Accept: application/vnd.github.v3+json" \
                https://api.github.com/gists/fa7b2f4758251a7901a64d3715b171d7 \
                -o gist.json
+          
+          echo "Gist yanıtı kontrol ediliyor..."
+          if [ ! -f "gist.json" ]; then
+            echo "Gist dosyası indirilemedi!"
+            exit 1
+          fi
+          
+          # JSON dosyasını kontrol et
+          cat gist.json
+          echo ""
+          echo "========================"
+          
+          # jq kurulu değilse kuralım
+          sudo apt-get update && sudo apt-get install -y jq
           
           # Gist içeriğini çıkar ve hikayeler.txt dosyasını oluştur
           cat gist.json | jq -r '.files["hikayeler.txt"].content' > hikayeler.txt
           
           # Dosyanın indirilip indirilmediğini kontrol et
           if [ ! -f "hikayeler.txt" ] || [ ! -s "hikayeler.txt" ]; then
-            echo "Hikayeler dosyası indirilemedi veya boş!"
+            echo "Hikayeler dosyası oluşturulamadı veya boş!"
+            echo "Gist içeriği:"
+            cat gist.json | jq '.files'
             exit 1
           fi
           
           echo "Hikayeler dosyası başarıyla indirildi:"
           wc -l hikayeler.txt
+          echo "İlk 3 satır:"
+          head -3 hikayeler.txt
           
       - name: Paketleri Kur
         run: npm install mastodon-api
+        
+      - name: API Endpoint Testi
+        run: |
+          echo "Farklı API endpoint'leri test ediliyor..."
+          
+          echo "1. /api/v1/ endpoint:"
+          curl -I "https://sosyal.teknofest.app/api/v1/"
+          
+          echo ""
+          echo "2. /api/v2/ endpoint:"  
+          curl -I "https://sosyal.teknofest.app/api/v2/"
+          
+          echo ""
+          echo "3. Ana sayfa testi:"
+          curl -I "https://sosyal.teknofest.app/"
+          
+          echo ""
+          echo "4. Instance bilgisi:"
+          curl -H "User-Agent: MastodonBot/1.0" "https://sosyal.teknofest.app/api/v1/instance" 2>/dev/null | head -10
+        run: |
+          echo "Curl ile Mastodon API testi..."
+          
+          # Hesap bilgilerini kontrol et
+          curl -v \
+            -H "Authorization: Bearer ${{ secrets.MASTODON_TOKEN }}" \
+            -H "User-Agent: MastodonBot/1.0.0 (curl; +https://github.com/terikisi/mastodon-bot)" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "https://sosyal.teknofest.app/api/v1/accounts/verify_credentials" \
+            2>&1 | head -50
+            
+          echo ""
+          echo "========================"
+          echo "Basit hikaye paylaşımı testi..."
+          
+          # Basit bir paylaşım yap
+          curl -v \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.MASTODON_TOKEN }}" \
+            -H "User-Agent: MastodonBot/1.0.0 (curl; +https://github.com/terikisi/mastodon-bot)" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"Test paylaşımı - GitHub Actions'tan","visibility":"public"}' \
+            "https://sosyal.teknofest.app/api/v1/statuses" \
+            2>&1 | head -50
+        run: |
+          cat << 'EOF' > test.js
+          const Mastodon = require('mastodon-api');
+          const mastodon = new Mastodon({
+            access_token: process.env.MASTODON_TOKEN,
+            api_url: 'https://sosyal.teknofest.app/api/v1/',
+            timeout_ms: 60 * 1000,
+            user_agent: 'MastodonBot/1.0.0 (Node.js; +https://github.com/terikisi/mastodon-bot)'
+          });
+          
+          async function testConnection() {
+            try {
+              console.log('Mastodon hesap bilgileri kontrol ediliyor...');
+              const account = await mastodon.get('accounts/verify_credentials');
+              
+              console.log('✓ Mastodon API yanıtı alındı!');
+              console.log('API Yanıt Yapısı:');
+              console.log('account.data tipi:', typeof account.data);
+              console.log('account.resp status:', account.resp?.statusCode);
+              console.log('Ham yanıt (ilk 500 karakter):');
+              console.log(JSON.stringify(account, null, 2).substring(0, 500) + '...');
+              
+              // Farklı veri yapısı kontrolü
+              let userData = account.data || account;
+              
+              console.log('Hesap bilgileri:');
+              console.log('- Kullanıcı adı:', userData.username || userData.acct || 'Bulunamadı');
+              console.log('- Display name:', userData.display_name || userData.displayName || 'Bulunamadı');
+              console.log('- ID:', userData.id || 'Bulunamadı');
+              console.log('- Profil URL:', userData.url || userData.uri || 'Bulunamadı');
+              
+              // Son paylaşımları kontrol et
+              console.log('\nSon paylaşımlar kontrol ediliyor...');
+              const timeline = await mastodon.get('timelines/home', { limit: 3 });
+              
+              console.log('Timeline API Yanıtı:');
+              console.log('timeline.data tipi:', typeof timeline.data);
+              console.log('timeline.data uzunluk:', Array.isArray(timeline.data) ? timeline.data.length : 'Array değil');
+              
+              if (Array.isArray(timeline.data) && timeline.data.length > 0) {
+                console.log('İlk paylaşım yapısı:');
+                console.log(JSON.stringify(timeline.data[0], null, 2).substring(0, 300) + '...');
+              }
+              
+            } catch (err) {
+              console.error('✗ Mastodon bağlantı hatası:');
+              console.error('Hata mesajı:', err.message);
+              if (err.response) {
+                console.error('HTTP Status:', err.response.status);
+                console.error('Response Data:', JSON.stringify(err.response.data, null, 2));
+              }
+              process.exit(1);
+            }
+          }
+          
+          testConnection();
+          EOF
+          
+          node test.js
+        env:
+          MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
         
       - name: Paylaşımı Yap
         run: |
@@ -66,7 +188,9 @@ jobs:
           const Mastodon = require('mastodon-api');
           const mastodon = new Mastodon({
             access_token: process.env.MASTODON_TOKEN,
-            api_url: 'https://sosyal.teknofest.app/api/v1/'
+            api_url: 'https://sosyal.teknofest.app/api/v1/',
+            timeout_ms: 60 * 1000,
+            user_agent: 'MastodonBot/1.0.0 (Node.js; +https://github.com/terikisi/mastodon-bot)'
           });
           
           // 5 rastgele hikaye seç
@@ -92,7 +216,25 @@ jobs:
                     visibility: 'public'
                   });
                   
-                  console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${resp.data.url || 'URL alınamadı'}`);
+                  // Detaylı yanıt logla
+                  console.log('API Yanıt Detayları:');
+                  console.log('Response tipi:', typeof resp);
+                  console.log('Response.data tipi:', typeof resp.data);
+                  console.log('Status Code:', resp.resp?.statusCode || 'Bilinmiyor');
+                  console.log('Ham Response (ilk 300 karakter):');
+                  console.log(JSON.stringify(resp, null, 2).substring(0, 300) + '...');
+                  
+                  // Farklı veri yapıları için ID'yi bul
+                  let postData = resp.data || resp;
+                  let postId = postData.id || postData.uri?.split('/').pop();
+                  
+                  if (postId) {
+                    const postUrl = `https://sosyal.teknofest.app/@terikisi/${postId}`;
+                    console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${postUrl}`);
+                  } else {
+                    console.log(`✓ ${i + 1}. hikaye paylaşıldı ama ID bulunamadı`);
+                    console.log('Mevcut post data:', JSON.stringify(postData));
+                  }
                   basariliPaylasmlar++;
                   
                   // Paylaşımlar arasında 3 saniye bekle
