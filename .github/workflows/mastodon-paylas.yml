@@ -66,7 +66,7 @@ jobs:
                   const resp = await mastodon.post('statuses', { status: hikaye });
                   
                   // URL'yi post ID'sinden manuel olarak oluştur
-                  const postUrl = resp.data.url || `https://sosyal.teknofest.app/@terikisi/${resp.data.id}`;
+                  const postUrl = resp.data.url || `https://sosyal.teknofest.app/@mukavemet/${resp.data.id}`;
                   
                   console.log(`✅ Başarıyla paylaşıldı: ${postUrl}`);
                   // Paylaşımlar arası 5 saniye bekle
