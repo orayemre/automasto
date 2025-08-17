@@ -54,13 +54,58 @@ jobs:
       - name: Paketleri Kur
         run: npm install mastodon-api
         
-      - name: Mastodon Bağlantısını Test Et
+      - name: API Endpoint Testi
+        run: |
+          echo "Farklı API endpoint'leri test ediliyor..."
+          
+          echo "1. /api/v1/ endpoint:"
+          curl -I "https://sosyal.teknofest.app/api/v1/"
+          
+          echo ""
+          echo "2. /api/v2/ endpoint:"  
+          curl -I "https://sosyal.teknofest.app/api/v2/"
+          
+          echo ""
+          echo "3. Ana sayfa testi:"
+          curl -I "https://sosyal.teknofest.app/"
+          
+          echo ""
+          echo "4. Instance bilgisi:"
+          curl -H "User-Agent: MastodonBot/1.0" "https://sosyal.teknofest.app/api/v1/instance" 2>/dev/null | head -10
+        run: |
+          echo "Curl ile Mastodon API testi..."
+          
+          # Hesap bilgilerini kontrol et
+          curl -v \
+            -H "Authorization: Bearer ${{ secrets.MASTODON_TOKEN }}" \
+            -H "User-Agent: MastodonBot/1.0.0 (curl; +https://github.com/terikisi/mastodon-bot)" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            "https://sosyal.teknofest.app/api/v1/accounts/verify_credentials" \
+            2>&1 | head -50
+            
+          echo ""
+          echo "========================"
+          echo "Basit hikaye paylaşımı testi..."
+          
+          # Basit bir paylaşım yap
+          curl -v \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.MASTODON_TOKEN }}" \
+            -H "User-Agent: MastodonBot/1.0.0 (curl; +https://github.com/terikisi/mastodon-bot)" \
+            -H "Accept: application/json" \
+            -H "Content-Type: application/json" \
+            -d '{"status":"Test paylaşımı - GitHub Actions'tan","visibility":"public"}' \
+            "https://sosyal.teknofest.app/api/v1/statuses" \
+            2>&1 | head -50
         run: |
           cat << 'EOF' > test.js
           const Mastodon = require('mastodon-api');
           const mastodon = new Mastodon({
             access_token: process.env.MASTODON_TOKEN,
-            api_url: 'https://sosyal.teknofest.app/api/v1/'
+            api_url: 'https://sosyal.teknofest.app/api/v1/',
+            timeout_ms: 60 * 1000,
+            user_agent: 'MastodonBot/1.0.0 (Node.js; +https://github.com/terikisi/mastodon-bot)'
           });
           
           async function testConnection() {
@@ -143,7 +188,9 @@ jobs:
           const Mastodon = require('mastodon-api');
           const mastodon = new Mastodon({
             access_token: process.env.MASTODON_TOKEN,
-            api_url: 'https://sosyal.teknofest.app/api/v1/'
+            api_url: 'https://sosyal.teknofest.app/api/v1/',
+            timeout_ms: 60 * 1000,
+            user_agent: 'MastodonBot/1.0.0 (Node.js; +https://github.com/terikisi/mastodon-bot)'
           });
           
           // 5 rastgele hikaye seç
