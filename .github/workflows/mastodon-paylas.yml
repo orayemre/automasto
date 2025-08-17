@@ -1,4 +1,4 @@
-name: Mastodon Otomatik Paylaşım (Proxy)
+name: Mastodon Otomatik Paylaşım (VPN/Tunnel)
 on:
   schedule:
     - cron: '0 8 * * *'
@@ -24,53 +24,45 @@ jobs:
           sudo apt-get update && sudo apt-get install -y jq
           cat gist.json | jq -r '.files["hikayeler.txt"].content' > hikayeler.txt
           
-          if [ ! -f "hikayeler.txt" ] || [ ! -s "hikayeler.txt" ]; then
-            echo "Hikayeler dosyası oluşturulamadı!"
+          if [ ! -s "hikayeler.txt" ]; then
+            echo "Hikayeler dosyası boş!"
             exit 1
           fi
           
           echo "✅ $(wc -l < hikayeler.txt) hikaye indirildi"
-          
-      - name: Proxy Setup ve Mastodon Paylaşımı
+
+      - name: Cloudflare Tunnel Setup
         run: |
-          echo "=== Ücretsiz Proxy Listesi Alınıyor ==="
+          echo "=== Cloudflare Tunnel Kurulumu ==="
           
-          # Ücretsiz HTTP proxy listesi al
-          curl -s "https://www.proxy-list.download/api/v1/get?type=http&anon=elite&country=US" > proxy_list.txt
+          # Cloudflared binary indir
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
           
-          # Eğer yukarıdaki çalışmazsa alternatif kaynak
-          if [ ! -s "proxy_list.txt" ]; then
-            curl -s "https://raw.githubusercontent.com/clarketm/proxy-list/master/proxy-list-raw.txt" | head -20 > proxy_list.txt
-          fi
+          # Tor kurulumu (alternatif yöntem)
+          sudo apt-get update
+          sudo apt-get install -y tor torsocks
           
-          # Eğer hâlâ boşsa manuel proxy listesi
-          if [ ! -s "proxy_list.txt" ]; then
-            cat << 'PROXY_EOF' > proxy_list.txt
-          8.210.83.33:80
-          47.74.152.29:8888
-          20.111.54.16:8123
-          103.127.1.130:80
-          190.61.88.147:8080
-          45.32.104.226:80
-          178.32.116.64:3128
-          95.217.34.209:3128
-          162.240.75.37:80
-          134.195.101.34:8080
-          PROXY_EOF
-          fi
+          # Tor servisini başlat
+          sudo systemctl start tor
+          sleep 10
           
-          echo "Proxy listesi:"
-          head -5 proxy_list.txt
-          echo ""
+          # Tor bağlantı testi
+          echo "🧅 Tor IP kontrolü:"
+          torsocks curl -s https://httpbin.org/ip || echo "Tor bağlantısı başarısız"
           
-          echo "=== Hikaye Paylaşım Scripti ==="
+          echo "🌐 Normal IP kontrolü:"
+          curl -s https://httpbin.org/ip || echo "Normal bağlantı başarısız"
+
+      - name: Multi-Method Mastodon Paylaşımı
+        run: |
+          npm install mastodon-api axios
           
-          npm install mastodon-api axios https-proxy-agent
-          
-          cat << 'EOF' > proxy-script.js
+          cat << 'EOF' > multi-method-script.js
           const fs = require('fs');
-          const axios = require('axios');
-          const { HttpsProxyAgent } = require('https-proxy-agent');
+          const { spawn, exec } = require('child_process');
+          const util = require('util');
+          const execAsync = util.promisify(exec);
           
           // Hikayeler dosyasını oku
           const hikayeler = fs.readFileSync('hikayeler.txt', 'utf8')
@@ -80,141 +72,191 @@ jobs:
           
           console.log(`📚 Toplam ${hikayeler.length} hikaye bulundu`);
           
-          // Proxy listesini oku
-          const proxyList = fs.readFileSync('proxy_list.txt', 'utf8')
-                             .split('\n')
-                             .filter(line => line.trim() !== '')
-                             .map(line => line.trim());
-          
-          console.log(`🔄 ${proxyList.length} proxy bulundu`);
-          
-          // Rastgele proxy seç
-          function getRandomProxy() {
-            const proxy = proxyList[Math.floor(Math.random() * proxyList.length)];
-            return `http://${proxy}`;
-          }
-          
-          // Proxy ile API çağrısı
-          async function callWithProxy(url, data, method = 'GET') {
-            const maxRetries = 3;
-            
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
-              try {
-                const proxyUrl = getRandomProxy();
-                console.log(`🔄 Deneme ${attempt + 1}: ${proxyUrl} kullanılıyor`);
-                
-                const agent = new HttpsProxyAgent(proxyUrl);
-                
-                const config = {
-                  method,
-                  url,
-                  headers: {
-                    'Authorization': `Bearer ${process.env.MASTODON_TOKEN}`,
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                  },
-                  httpsAgent: agent,
-                  httpAgent: agent,
-                  timeout: 10000
-                };
-                
-                if (data) {
-                  config.data = data;
-                }
-                
-                const response = await axios(config);
-                console.log(`✅ Başarılı yanıt: ${response.status}`);
-                return response.data;
-                
-              } catch (error) {
-                console.log(`❌ Deneme ${attempt + 1} başarısız: ${error.message}`);
-                if (attempt === maxRetries - 1) {
-                  throw error;
-                }
-                // Sonraki denemede farklı proxy kullanılacak
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              }
-            }
-          }
-          
-          async function testConnection() {
+          // Method 1: Tor ile curl
+          async function postWithTor(content, index) {
             try {
-              console.log('\n🔐 Hesap bilgileri kontrol ediliyor...');
-              const account = await callWithProxy('https://sosyal.teknofest.app/api/v1/accounts/verify_credentials');
+              console.log(`\n🧅 [TOR] ${index + 1}. hikaye paylaşılıyor...`);
               
-              console.log('✅ API bağlantısı başarılı!');
-              console.log(`👤 Kullanıcı: ${account.username || account.acct || 'Bilinmiyor'}`);
-              console.log(`📊 Paylaşım sayısı: ${account.statuses_count || 'Bilinmiyor'}`);
-              
-              return true;
-            } catch (error) {
-              console.error('❌ Hesap doğrulama başarısız:', error.message);
-              return false;
-            }
-          }
-          
-          async function postStatus(content, index) {
-            try {
               const truncatedContent = content.length > 480 ? content.substring(0, 477) + '...' : content;
               
-              console.log(`\n📝 ${index + 1}. hikaye paylaşılıyor (${truncatedContent.length} karakter)...`);
-              
-              const result = await callWithProxy(
-                'https://sosyal.teknofest.app/api/v1/statuses',
-                {
+              const cmd = [
+                'torsocks', 'curl', '-s', '-X', 'POST',
+                '-H', `Authorization: Bearer ${process.env.MASTODON_TOKEN}`,
+                '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                '-H', 'Accept: application/json',
+                '-H', 'Content-Type: application/json',
+                '-d', JSON.stringify({
                   status: truncatedContent,
                   visibility: 'public'
-                },
-                'POST'
-              );
+                }),
+                'https://sosyal.teknofest.app/api/v1/statuses'
+              ].join(' ');
               
-              if (result && result.id) {
-                const postUrl = `https://sosyal.teknofest.app/@terikisi/${result.id}`;
-                console.log(`✅ ${index + 1}. hikaye başarılı: ${postUrl}`);
-                return true;
+              const { stdout, stderr } = await execAsync(cmd);
+              
+              if (stdout.includes('"id"')) {
+                console.log(`✅ [TOR] ${index + 1}. hikaye başarılı`);
+                return { success: true, method: 'TOR' };
+              } else if (stdout.includes('<!DOCTYPE html>')) {
+                console.log(`❌ [TOR] ${index + 1}. hikaye - HTML yanıtı (Cloudflare)`);
+                return { success: false, method: 'TOR' };
               } else {
-                console.log(`⚠️ ${index + 1}. hikaye paylaşıldı ama ID bulunamadı`);
-                return true; // API yanıt verdi, muhtemelen başarılı
+                console.log(`⚠️ [TOR] ${index + 1}. hikaye - belirsiz yanıt`);
+                return { success: false, method: 'TOR' };
               }
               
             } catch (error) {
-              console.error(`❌ ${index + 1}. hikaye başarısız:`, error.message);
-              return false;
+              console.log(`❌ [TOR] ${index + 1}. hikaye hata:`, error.message);
+              return { success: false, method: 'TOR' };
             }
           }
           
-          async function main() {
-            // Önce bağlantıyı test et
-            const connectionOk = await testConnection();
-            if (!connectionOk) {
-              console.error('🚫 API bağlantısı kurulamadı, paylaşım yapılamıyor');
-              return;
+          // Method 2: Farklı User-Agent ile normal curl
+          async function postWithUserAgent(content, index) {
+            try {
+              console.log(`\n🎭 [UA] ${index + 1}. hikaye paylaşılıyor...`);
+              
+              const userAgents = [
+                'Mozilla/5.0 (iPhone; CPU iPhone OS 15_0 like Mac OS X) AppleWebKit/605.1.15',
+                'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko)',
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101'
+              ];
+              
+              const randomUA = userAgents[Math.floor(Math.random() * userAgents.length)];
+              const truncatedContent = content.length > 480 ? content.substring(0, 477) + '...' : content;
+              
+              const cmd = [
+                'curl', '-s', '-X', 'POST',
+                '-H', `Authorization: Bearer ${process.env.MASTODON_TOKEN}`,
+                '-H', `User-Agent: ${randomUA}`,
+                '-H', 'Accept: application/json',
+                '-H', 'Content-Type: application/json',
+                '-H', 'X-Forwarded-For: ' + Math.floor(Math.random() * 255) + '.' + Math.floor(Math.random() * 255) + '.1.1',
+                '-d', JSON.stringify({
+                  status: truncatedContent,
+                  visibility: 'public'
+                }),
+                'https://sosyal.teknofest.app/api/v1/statuses'
+              ].join(' ');
+              
+              const { stdout } = await execAsync(cmd);
+              
+              if (stdout.includes('"id"')) {
+                console.log(`✅ [UA] ${index + 1}. hikaye başarılı`);
+                return { success: true, method: 'User-Agent' };
+              } else {
+                console.log(`❌ [UA] ${index + 1}. hikaye başarısız`);
+                return { success: false, method: 'User-Agent' };
+              }
+              
+            } catch (error) {
+              console.log(`❌ [UA] ${index + 1}. hikaye hata:`, error.message);
+              return { success: false, method: 'User-Agent' };
             }
+          }
+          
+          // Method 3: Delay ve Retry ile
+          async function postWithRetry(content, index) {
+            try {
+              console.log(`\n🔄 [RETRY] ${index + 1}. hikaye paylaşılıyor...`);
+              
+              const truncatedContent = content.length > 480 ? content.substring(0, 477) + '...' : content;
+              
+              // Rastgele delay (1-3 saniye)
+              const delay = Math.floor(Math.random() * 3000) + 1000;
+              await new Promise(resolve => setTimeout(resolve, delay));
+              
+              const cmd = [
+                'curl', '-s', '-X', 'POST',
+                '--max-time', '30',
+                '--retry', '2',
+                '--retry-delay', '5',
+                '-H', `Authorization: Bearer ${process.env.MASTODON_TOKEN}`,
+                '-H', 'User-Agent: PostmanRuntime/7.29.2',
+                '-H', 'Accept: application/json',
+                '-H', 'Content-Type: application/json',
+                '-H', 'Cache-Control: no-cache',
+                '-d', JSON.stringify({
+                  status: truncatedContent,
+                  visibility: 'public'
+                }),
+                'https://sosyal.teknofest.app/api/v1/statuses'
+              ].join(' ');
+              
+              const { stdout } = await execAsync(cmd);
+              
+              if (stdout.includes('"id"')) {
+                console.log(`✅ [RETRY] ${index + 1}. hikaye başarılı`);
+                return { success: true, method: 'Retry' };
+              } else {
+                console.log(`❌ [RETRY] ${index + 1}. hikaye başarısız`);
+                return { success: false, method: 'Retry' };
+              }
+              
+            } catch (error) {
+              console.log(`❌ [RETRY] ${index + 1}. hikaye hata:`, error.message);
+              return { success: false, method: 'Retry' };
+            }
+          }
+          
+          // Ana fonksiyon
+          async function main() {
+            const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 3);
+            console.log(`\n🎯 ${secilenHikayeler.length} hikaye 3 farklı yöntemle denenecek`);
             
-            // 5 rastgele hikaye seç
-            const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 5);
-            
-            console.log(`\n🎯 ${secilenHikayeler.length} hikaye paylaşılacak`);
-            
-            let basarili = 0;
+            const results = {
+              'TOR': { success: 0, total: 0 },
+              'User-Agent': { success: 0, total: 0 },
+              'Retry': { success: 0, total: 0 }
+            };
             
             for (let i = 0; i < secilenHikayeler.length; i++) {
-              const result = await postStatus(secilenHikayeler[i], i);
-              if (result) basarili++;
+              const hikaye = secilenHikayeler[i];
+              console.log(`\n📝 === ${i + 1}. Hikaye (${hikaye.length} karakter) ===`);
               
-              // Paylaşımlar arası bekleme
+              // Üç yöntemi sırayla dene
+              const methods = [
+                () => postWithTor(hikaye, i),
+                () => postWithUserAgent(hikaye, i),
+                () => postWithRetry(hikaye, i)
+              ];
+              
+              let posted = false;
+              for (const method of methods) {
+                if (posted) break;
+                
+                const result = await method();
+                results[result.method].total++;
+                
+                if (result.success) {
+                  results[result.method].success++;
+                  posted = true;
+                  console.log(`✅ Hikaye ${result.method} yöntemi ile başarılı!`);
+                  break;
+                }
+                
+                // Yöntemler arası kısa bekleme
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              }
+              
+              if (!posted) {
+                console.log(`❌ ${i + 1}. hikaye tüm yöntemlerle başarısız`);
+              }
+              
+              // Hikayeler arası bekleme
               if (i < secilenHikayeler.length - 1) {
-                console.log('⏱️ 3 saniye bekleniyor...');
-                await new Promise(resolve => setTimeout(resolve, 3000));
+                console.log('⏱️ 5 saniye bekleniyor...');
+                await new Promise(resolve => setTimeout(resolve, 5000));
               }
             }
             
-            console.log(`\n📊 === SONUÇ ===`);
-            console.log(`📈 Toplam deneme: ${secilenHikayeler.length}`);
-            console.log(`✅ Başarılı: ${basarili}`);
-            console.log(`❌ Başarısız: ${secilenHikayeler.length - basarili}`);
-            console.log(`🎯 Başarı oranı: ${Math.round((basarili / secilenHikayeler.length) * 100)}%`);
+            // Sonuç raporu
+            console.log(`\n📊 === YÖNTEMLERİN BAŞARI ORANLARI ===`);
+            for (const [method, stats] of Object.entries(results)) {
+              const rate = stats.total > 0 ? Math.round((stats.success / stats.total) * 100) : 0;
+              console.log(`${method}: ${stats.success}/${stats.total} (${rate}%)`);
+            }
           }
           
           main().catch(error => {
@@ -223,16 +265,7 @@ jobs:
           });
           EOF
           
-          echo "🚀 Proxy ile paylaşım başlatılıyor..."
-          node proxy-script.js
+          echo "🚀 Multi-method paylaşım başlatılıyor..."
+          node multi-method-script.js
         env:
           MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
-          
-      - name: Proxy İstatistikleri
-        if: always()
-        run: |
-          echo "=== Proxy Kullanım Raporu ==="
-          echo "🕐 İşlem tarihi: $(date)"
-          echo "🌐 GitHub Actions IP: $(curl -s ifconfig.me)"
-          echo "📋 Kullanılan proxy sayısı: $(wc -l < proxy_list.txt)"
-          echo "✅ İşlem tamamlandı"
