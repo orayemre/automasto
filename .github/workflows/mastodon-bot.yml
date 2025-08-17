@@ -54,6 +54,59 @@ jobs:
       - name: Paketleri Kur
         run: npm install mastodon-api
         
+      - name: Mastodon Bağlantısını Test Et
+        run: |
+          cat << 'EOF' > test.js
+          const Mastodon = require('mastodon-api');
+          const mastodon = new Mastodon({
+            access_token: process.env.MASTODON_TOKEN,
+            api_url: 'https://sosyal.teknofest.app/api/v1/'
+          });
+          
+          async function testConnection() {
+            try {
+              console.log('Mastodon hesap bilgileri kontrol ediliyor...');
+              const account = await mastodon.get('accounts/verify_credentials');
+              
+              console.log('✓ Mastodon bağlantısı başarılı!');
+              console.log('Hesap bilgileri:');
+              console.log('- Kullanıcı adı:', account.data.username);
+              console.log('- Display name:', account.data.display_name);
+              console.log('- ID:', account.data.id);
+              console.log('- Follower sayısı:', account.data.followers_count);
+              console.log('- Paylaşım sayısı:', account.data.statuses_count);
+              console.log('- Profil URL:', account.data.url);
+              
+              // Son paylaşımları kontrol et
+              console.log('\nSon 5 paylaşım kontrol ediliyor...');
+              const timeline = await mastodon.get('accounts/' + account.data.id + '/statuses', { limit: 5 });
+              console.log('Son paylaşım sayısı:', timeline.data.length);
+              
+              if (timeline.data.length > 0) {
+                console.log('En son paylaşım:');
+                console.log('- İçerik:', timeline.data[0].content);
+                console.log('- Tarih:', timeline.data[0].created_at);
+                console.log('- URL:', timeline.data[0].url);
+              }
+              
+            } catch (err) {
+              console.error('✗ Mastodon bağlantı hatası:');
+              console.error('Hata mesajı:', err.message);
+              if (err.response) {
+                console.error('HTTP Status:', err.response.status);
+                console.error('Response Data:', JSON.stringify(err.response.data, null, 2));
+              }
+              process.exit(1);
+            }
+          }
+          
+          testConnection();
+          EOF
+          
+          node test.js
+        env:
+          MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
+        
       - name: Paylaşımı Yap
         run: |
           cat << 'EOF' > script.js
@@ -108,7 +161,17 @@ jobs:
                     visibility: 'public'
                   });
                   
-                  console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${resp.data.url || 'URL alınamadı'}`);
+                  // Detaylı yanıt logla
+                  console.log('API Yanıt Detayları:');
+                  console.log('Status Code:', resp.resp?.statusCode || 'Bilinmiyor');
+                  console.log('Response Data:', JSON.stringify(resp.data, null, 2));
+                  
+                  if (resp.data && resp.data.id) {
+                    const postUrl = `https://sosyal.teknofest.app/@terikisi/${resp.data.id}`;
+                    console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${postUrl}`);
+                  } else {
+                    console.log(`✓ ${i + 1}. hikaye paylaşıldı ama URL oluşturulamadı`);
+                  }
                   basariliPaylasmlar++;
                   
                   // Paylaşımlar arasında 3 saniye bekle
