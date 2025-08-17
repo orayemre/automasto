@@ -1,4 +1,4 @@
-name: Mastodon Oto
+name: Mastodon Otomatik Paylaşım
 on:
   schedule:
     - cron: '0 8 * * *'  # Her gün saat 8:00'de çalışır
