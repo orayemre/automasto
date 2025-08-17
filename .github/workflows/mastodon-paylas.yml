@@ -1,4 +1,4 @@
-name: Mastodon Otomatik Paylaşım
+name: Mastodon Oto Paylaşım
 
 on:
   schedule:
@@ -48,8 +48,10 @@ jobs:
                                .split('\n')
                                .filter(line => line.trim() !== '');
 
-          // Mastodon API istemcisini mevcut erişim belirteci ile başlat
+          // Mastodon API istemcisini gerekli anahtarlar ve belirteçle başlat
           const mastodon = new Mastodon({
+            client_key: process.env.CLIENT_KEY,
+            client_secret: process.env.CLIENT_SECRET,
             access_token: process.env.MASTODON_TOKEN,
             api_url: 'https://sosyal.teknofest.app/api/v1/'
           });
@@ -101,3 +103,5 @@ jobs:
           node mastodon-paylas.js
         env:
           MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
+          CLIENT_KEY: ${{ secrets.CLIENT_KEY }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
