@@ -35,24 +35,25 @@ jobs:
           node-version: '18'
           
       - name: Paketleri Kur
-        run: npm install mastodon-api
+        run: npm install axios
 
       - name: Mastodon'da Paylaşım Yap
         run: |
           cat << 'EOF' > mastodon-paylas.js
           const fs = require('fs');
-          const Mastodon = require('mastodon-api');
+          const axios = require('axios');
 
           // Hikayeler dosyasını oku ve boş satırları filtrele
           const hikayeler = fs.readFileSync('hikayeler.txt', 'utf8')
                                .split('\n')
                                .filter(line => line.trim() !== '');
 
-          // Mastodon API istemcisini mevcut erişim belirteci ile başlat
-          const mastodon = new Mastodon({
-            access_token: process.env.MASTODON_TOKEN,
-            api_url: 'https://sosyal.teknofest.app/api/v1/'
-          });
+          const MASTODON_HOST = 'https://sosyal.teknofest.app';
+          const MASTODON_TOKEN = process.env.MASTODON_TOKEN;
+          const headers = {
+            'Authorization': `Bearer ${MASTODON_TOKEN}`,
+            'Content-Type': 'application/json',
+          };
 
           // Rastgele 3 hikaye seç
           const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 3);
@@ -63,16 +64,26 @@ jobs:
               if (hikaye.length > 0) {
                 try {
                   console.log(`\n📝 Paylaşım yapılıyor: "${hikaye.substring(0, 50)}..."`);
-                  const resp = await mastodon.post('statuses', { status: hikaye });
                   
-                  // URL'yi post ID'sinden manuel olarak oluştur
-                  const postUrl = resp.data.url || `https://sosyal.teknofest.app/@mukavemet/${resp.data.id}`;
+                  const response = await axios.post(`${MASTODON_HOST}/api/v1/statuses`, {
+                    status: hikaye,
+                    visibility: 'public'
+                  }, { headers: headers });
                   
-                  console.log(`✅ Başarıyla paylaşıldı: ${postUrl}`);
+                  // URL'yi doğrudan yanıttan al
+                  const postUrl = response.data.url;
+                  
+                  if (postUrl) {
+                    console.log(`✅ Başarıyla paylaşıldı: ${postUrl}`);
+                  } else {
+                    console.error('❌ Paylaşım URL\'si alınamadı, ancak paylaşım başarılı gibi görünüyor.');
+                    console.log(`Yanıt verisi: ${JSON.stringify(response.data)}`);
+                  }
+                  
                   // Paylaşımlar arası 5 saniye bekle
                   await new Promise(resolve => setTimeout(resolve, 5000));
                 } catch (err) {
-                  console.error('❌ Paylaşım başarısız:', err.response?.data || err.message);
+                  console.error('❌ Paylaşım başarısız:', err.response?.data?.error || err.message);
                 }
               }
             }
