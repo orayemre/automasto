@@ -68,25 +68,33 @@ jobs:
               console.log('Mastodon hesap bilgileri kontrol ediliyor...');
               const account = await mastodon.get('accounts/verify_credentials');
               
-              console.log('✓ Mastodon bağlantısı başarılı!');
+              console.log('✓ Mastodon API yanıtı alındı!');
+              console.log('API Yanıt Yapısı:');
+              console.log('account.data tipi:', typeof account.data);
+              console.log('account.resp status:', account.resp?.statusCode);
+              console.log('Ham yanıt (ilk 500 karakter):');
+              console.log(JSON.stringify(account, null, 2).substring(0, 500) + '...');
+              
+              // Farklı veri yapısı kontrolü
+              let userData = account.data || account;
+              
               console.log('Hesap bilgileri:');
-              console.log('- Kullanıcı adı:', account.data.username);
-              console.log('- Display name:', account.data.display_name);
-              console.log('- ID:', account.data.id);
-              console.log('- Follower sayısı:', account.data.followers_count);
-              console.log('- Paylaşım sayısı:', account.data.statuses_count);
-              console.log('- Profil URL:', account.data.url);
+              console.log('- Kullanıcı adı:', userData.username || userData.acct || 'Bulunamadı');
+              console.log('- Display name:', userData.display_name || userData.displayName || 'Bulunamadı');
+              console.log('- ID:', userData.id || 'Bulunamadı');
+              console.log('- Profil URL:', userData.url || userData.uri || 'Bulunamadı');
               
               // Son paylaşımları kontrol et
-              console.log('\nSon 5 paylaşım kontrol ediliyor...');
-              const timeline = await mastodon.get('accounts/' + account.data.id + '/statuses', { limit: 5 });
-              console.log('Son paylaşım sayısı:', timeline.data.length);
+              console.log('\nSon paylaşımlar kontrol ediliyor...');
+              const timeline = await mastodon.get('timelines/home', { limit: 3 });
               
-              if (timeline.data.length > 0) {
-                console.log('En son paylaşım:');
-                console.log('- İçerik:', timeline.data[0].content);
-                console.log('- Tarih:', timeline.data[0].created_at);
-                console.log('- URL:', timeline.data[0].url);
+              console.log('Timeline API Yanıtı:');
+              console.log('timeline.data tipi:', typeof timeline.data);
+              console.log('timeline.data uzunluk:', Array.isArray(timeline.data) ? timeline.data.length : 'Array değil');
+              
+              if (Array.isArray(timeline.data) && timeline.data.length > 0) {
+                console.log('İlk paylaşım yapısı:');
+                console.log(JSON.stringify(timeline.data[0], null, 2).substring(0, 300) + '...');
               }
               
             } catch (err) {
@@ -163,14 +171,22 @@ jobs:
                   
                   // Detaylı yanıt logla
                   console.log('API Yanıt Detayları:');
+                  console.log('Response tipi:', typeof resp);
+                  console.log('Response.data tipi:', typeof resp.data);
                   console.log('Status Code:', resp.resp?.statusCode || 'Bilinmiyor');
-                  console.log('Response Data:', JSON.stringify(resp.data, null, 2));
+                  console.log('Ham Response (ilk 300 karakter):');
+                  console.log(JSON.stringify(resp, null, 2).substring(0, 300) + '...');
                   
-                  if (resp.data && resp.data.id) {
-                    const postUrl = `https://sosyal.teknofest.app/@terikisi/${resp.data.id}`;
+                  // Farklı veri yapıları için ID'yi bul
+                  let postData = resp.data || resp;
+                  let postId = postData.id || postData.uri?.split('/').pop();
+                  
+                  if (postId) {
+                    const postUrl = `https://sosyal.teknofest.app/@terikisi/${postId}`;
                     console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${postUrl}`);
                   } else {
-                    console.log(`✓ ${i + 1}. hikaye paylaşıldı ama URL oluşturulamadı`);
+                    console.log(`✓ ${i + 1}. hikaye paylaşıldı ama ID bulunamadı`);
+                    console.log('Mevcut post data:', JSON.stringify(postData));
                   }
                   basariliPaylasmlar++;
                   
