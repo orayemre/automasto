@@ -1,4 +1,4 @@
-name: Mastodon Oto Paylaşım
+name: Mastodon Otomatik Paylaşım
 
 on:
   schedule:
@@ -13,7 +13,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          
+
       - name: Paketleri Kur
         run: npm install mastodon-api
 
@@ -25,11 +25,9 @@ jobs:
                https://api.github.com/gists/fa7b2f4758251a7901a64d3715b171d7 \
                -o gist.json
           
-          # jq aracı ile JSON dosyasından hikayeler.txt içeriğini ayıkla
           sudo apt-get update && sudo apt-get install -y jq
           cat gist.json | jq -r '.files["hikayeler.txt"].content' > hikayeler.txt
           
-          # Dosyanın boş olup olmadığını kontrol et
           if [ ! -s "hikayeler.txt" ]; then
             echo "Hikayeler dosyası boş!"
             exit 1
@@ -43,12 +41,10 @@ jobs:
           const fs = require('fs');
           const Mastodon = require('mastodon-api');
 
-          // Hikayeler dosyasını oku ve boş satırları filtrele
           const hikayeler = fs.readFileSync('hikayeler.txt', 'utf8')
                                .split('\n')
                                .filter(line => line.trim() !== '');
 
-          // Mastodon API istemcisini gerekli anahtarlar ve belirteçle başlat
           const mastodon = new Mastodon({
             client_key: process.env.CLIENT_KEY,
             client_secret: process.env.CLIENT_SECRET,
@@ -56,7 +52,6 @@ jobs:
             api_url: 'https://sosyal.teknofest.app/api/v1/'
           });
 
-          // Rastgele 3 hikaye seç
           const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 3);
 
           async function paylas() {
@@ -66,28 +61,26 @@ jobs:
                 try {
                   console.log(`\n📝 Paylaşım yapılıyor: "${hikaye.substring(0, 50)}..."`);
                   const resp = await mastodon.post('statuses', { status: hikaye });
+                  console.log('API Yanıtı:', JSON.stringify(resp.data, null, 2));
                   
-                  // URL'yi doğrudan yanıttan al veya manuel oluştur
-                  let postUrl = resp?.data?.url;
+                  let postUrl = resp?.data?.url || resp?.data?.uri;
                   if (!postUrl && resp?.data?.id) {
-                     postUrl = `https://sosyal.teknofest.app/@mukavemet/${resp.data.id}`;
+                    postUrl = `https://sosyal.teknofest.app/@mukavemet/${resp.data.id}`;
                   }
                   
                   if (postUrl) {
                     console.log(`✅ Başarıyla paylaşıldı: ${postUrl}`);
                   } else {
                     console.error('❌ Paylaşım URL\'si bulunamadı.');
-                    console.log(`Tam yanıt: ${JSON.stringify(resp.data)}`);
+                    console.log(`Tam yanıt: ${JSON.stringify(resp.data, null, 2)}`);
                   }
                   
-                  // Paylaşımlar arası 5 saniye bekle
                   await new Promise(resolve => setTimeout(resolve, 5000));
                 } catch (err) {
                   console.error('❌ Paylaşım başarısız:');
                   if (err.response) {
-                    // API'den gelen daha detaylı hata mesajı
                     console.error(`Durum kodu: ${err.response.status}`);
-                    console.error(`Hata verisi: ${JSON.stringify(err.response.data)}`);
+                    console.error(`Hata verisi: ${JSON.stringify(err.response.data, null, 2)}`);
                   } else {
                     console.error(`Hata mesajı: ${err.message}`);
                   }
