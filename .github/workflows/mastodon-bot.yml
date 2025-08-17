@@ -1,8 +1,8 @@
 name: Mastodon Otomatik Paylaşım
 on:
   schedule:
-    - cron: '0 8 * * *'  # Her gün saat 8:00'de çalışır
-  workflow_dispatch:  # Manuel çalıştırma için
+    - cron: '0 8 * * *'
+  workflow_dispatch:
 
 jobs:
   paylas:
@@ -27,244 +27,161 @@ jobs:
             exit 1
           fi
           
-          # JSON dosyasını kontrol et
-          cat gist.json
-          echo ""
-          echo "========================"
-          
-          # jq kurulu değilse kuralım
           sudo apt-get update && sudo apt-get install -y jq
-          
-          # Gist içeriğini çıkar ve hikayeler.txt dosyasını oluştur
           cat gist.json | jq -r '.files["hikayeler.txt"].content' > hikayeler.txt
           
-          # Dosyanın indirilip indirilmediğini kontrol et
           if [ ! -f "hikayeler.txt" ] || [ ! -s "hikayeler.txt" ]; then
             echo "Hikayeler dosyası oluşturulamadı veya boş!"
-            echo "Gist içeriği:"
-            cat gist.json | jq '.files'
             exit 1
           fi
           
           echo "Hikayeler dosyası başarıyla indirildi:"
           wc -l hikayeler.txt
-          echo "İlk 3 satır:"
-          head -3 hikayeler.txt
           
-      - name: Paketleri Kur
-        run: npm install mastodon-api
-        
-      - name: API Endpoint Testi
+      - name: API Test ve Paylaşım
         run: |
-          echo "Farklı API endpoint'leri test ediliyor..."
+          echo "=== Mastodon API Testi ==="
           
-          echo "1. /api/v1/ endpoint:"
-          curl -I "https://sosyal.teknofest.app/api/v1/"
-          
-          echo ""
-          echo "2. /api/v2/ endpoint:"  
-          curl -I "https://sosyal.teknofest.app/api/v2/"
+          # 1. Instance bilgisi
+          echo "1. Instance bilgisi kontrol ediliyor..."
+          curl -H "User-Agent: MastodonBot/1.0" "https://sosyal.teknofest.app/api/v1/instance" 2>/dev/null | head -5
           
           echo ""
-          echo "3. Ana sayfa testi:"
-          curl -I "https://sosyal.teknofest.app/"
-          
-          echo ""
-          echo "4. Instance bilgisi:"
-          curl -H "User-Agent: MastodonBot/1.0" "https://sosyal.teknofest.app/api/v1/instance" 2>/dev/null | head -10
-          
-          echo ""
-          echo "========================"
-          echo "Curl ile Mastodon API testi..."
-          
-          # Hesap bilgilerini kontrol et
-          curl -v \
+          echo "2. Hesap bilgileri kontrol ediliyor..."
+          # Hesap doğrulama
+          ACCOUNT_RESPONSE=$(curl -s \
             -H "Authorization: Bearer ${{ secrets.MASTODON_TOKEN }}" \
-            -H "User-Agent: MastodonBot/1.0.0 (curl; +https://github.com/terikisi/mastodon-bot)" \
+            -H "User-Agent: MastodonBot/1.0.0" \
             -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            "https://sosyal.teknofest.app/api/v1/accounts/verify_credentials" \
-            2>&1 | head -50
-            
-          echo ""
-          echo "========================"
-          echo "Basit hikaye paylaşımı testi..."
+            "https://sosyal.teknofest.app/api/v1/accounts/verify_credentials")
           
-          # Basit bir paylaşım yap
-          curl -v \
+          echo "API Yanıt (ilk 200 karakter):"
+          echo "$ACCOUNT_RESPONSE" | head -c 200
+          echo ""
+          
+          # HTML response kontrolü (Cloudflare kontrolü)
+          if echo "$ACCOUNT_RESPONSE" | grep -q "<!DOCTYPE html>"; then
+            echo "❌ Cloudflare engeli tespit edildi!"
+            echo "GitHub Actions IP'si engellenmiş olabilir."
+          else
+            echo "✅ API yanıtı HTML değil, JSON olabilir"
+          fi
+          
+          echo ""
+          echo "3. Test paylaşımı yapılıyor..."
+          # Test paylaşımı
+          POST_RESPONSE=$(curl -s \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.MASTODON_TOKEN }}" \
-            -H "User-Agent: MastodonBot/1.0.0 (curl; +https://github.com/terikisi/mastodon-bot)" \
+            -H "User-Agent: MastodonBot/1.0.0" \
             -H "Accept: application/json" \
             -H "Content-Type: application/json" \
-            -d '{"status":"Test paylaşımı - GitHub Actions'tan","visibility":"public"}' \
-            "https://sosyal.teknofest.app/api/v1/statuses" \
-            2>&1 | head -50
-        run: |
-          cat << 'EOF' > test.js
-          const Mastodon = require('mastodon-api');
-          const mastodon = new Mastodon({
-            access_token: process.env.MASTODON_TOKEN,
-            api_url: 'https://sosyal.teknofest.app/api/v1/',
-            timeout_ms: 60 * 1000,
-            user_agent: 'MastodonBot/1.0.0 (Node.js; +https://github.com/terikisi/mastodon-bot)'
-          });
+            -d '{"status":"🤖 GitHub Actions test paylaşımı - ' $(date) '","visibility":"public"}' \
+            "https://sosyal.teknofest.app/api/v1/statuses")
           
-          async function testConnection() {
-            try {
-              console.log('Mastodon hesap bilgileri kontrol ediliyor...');
-              const account = await mastodon.get('accounts/verify_credentials');
-              
-              console.log('✓ Mastodon API yanıtı alındı!');
-              console.log('API Yanıt Yapısı:');
-              console.log('account.data tipi:', typeof account.data);
-              console.log('account.resp status:', account.resp?.statusCode);
-              console.log('Ham yanıt (ilk 500 karakter):');
-              console.log(JSON.stringify(account, null, 2).substring(0, 500) + '...');
-              
-              // Farklı veri yapısı kontrolü
-              let userData = account.data || account;
-              
-              console.log('Hesap bilgileri:');
-              console.log('- Kullanıcı adı:', userData.username || userData.acct || 'Bulunamadı');
-              console.log('- Display name:', userData.display_name || userData.displayName || 'Bulunamadı');
-              console.log('- ID:', userData.id || 'Bulunamadı');
-              console.log('- Profil URL:', userData.url || userData.uri || 'Bulunamadı');
-              
-              // Son paylaşımları kontrol et
-              console.log('\nSon paylaşımlar kontrol ediliyor...');
-              const timeline = await mastodon.get('timelines/home', { limit: 3 });
-              
-              console.log('Timeline API Yanıtı:');
-              console.log('timeline.data tipi:', typeof timeline.data);
-              console.log('timeline.data uzunluk:', Array.isArray(timeline.data) ? timeline.data.length : 'Array değil');
-              
-              if (Array.isArray(timeline.data) && timeline.data.length > 0) {
-                console.log('İlk paylaşım yapısı:');
-                console.log(JSON.stringify(timeline.data[0], null, 2).substring(0, 300) + '...');
-              }
-              
-            } catch (err) {
-              console.error('✗ Mastodon bağlantı hatası:');
-              console.error('Hata mesajı:', err.message);
-              if (err.response) {
-                console.error('HTTP Status:', err.response.status);
-                console.error('Response Data:', JSON.stringify(err.response.data, null, 2));
-              }
-              process.exit(1);
-            }
-          }
+          echo "Paylaşım API Yanıt (ilk 300 karakter):"
+          echo "$POST_RESPONSE" | head -c 300
+          echo ""
           
-          testConnection();
-          EOF
+          # Başarı kontrolü
+          if echo "$POST_RESPONSE" | grep -q '"id"'; then
+            echo "✅ Test paylaşımı başarılı!"
+            echo "Paylaşım ID'si bulundu."
+          elif echo "$POST_RESPONSE" | grep -q "<!DOCTYPE html>"; then
+            echo "❌ Paylaşımda da Cloudflare engeli!"
+          else
+            echo "⚠️ Belirsiz durum - API yanıtını kontrol edin"
+          fi
           
-          node test.js
-        env:
-          MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
-        
-      - name: Paylaşımı Yap
-        run: |
+          echo ""
+          echo "=== Hikaye Paylaşımları ==="
+          
+          # Node.js ile hikaye paylaşımları
+          npm install mastodon-api
+          
           cat << 'EOF' > script.js
           const fs = require('fs');
-          const path = require('path');
           
-          // Dosya varlığını kontrol et
-          const hikayelerPath = path.join(__dirname, 'hikayeler.txt');
-          if (!fs.existsSync(hikayelerPath)) {
-            console.error('hikayeler.txt dosyası bulunamadı!');
-            process.exit(1);
-          }
-          
-          const hikayeler = fs.readFileSync(hikayelerPath, 'utf8')
+          // Hikayeler dosyasını oku
+          const hikayeler = fs.readFileSync('hikayeler.txt', 'utf8')
                                .split('\n')
                                .filter(line => line.trim() !== '')
-                               .filter(line => line.length > 10); // Çok kısa satırları filtrele
+                               .filter(line => line.length > 10);
+          
+          console.log(`Toplam ${hikayeler.length} hikaye bulundu`);
           
           if (hikayeler.length === 0) {
             console.error('Geçerli hikaye bulunamadı!');
             process.exit(1);
           }
           
-          console.log(`Toplam ${hikayeler.length} hikaye bulundu`);
+          // curl ile paylaşım fonksiyonu  
+          async function curlPost(hikaye, index) {
+            const { spawn } = require('child_process');
+            
+            return new Promise((resolve, reject) => {
+              const hikayeEscaped = hikaye.replace(/"/g, '\\"').replace(/'/g, "\\'");
+              const curlArgs = [
+                '-s', '-X', 'POST',
+                '-H', 'Authorization: Bearer ' + process.env.MASTODON_TOKEN,
+                '-H', 'User-Agent: MastodonBot/1.0.0',
+                '-H', 'Accept: application/json',
+                '-H', 'Content-Type: application/json',
+                '-d', JSON.stringify({
+                  status: hikaye.length > 480 ? hikaye.substring(0, 477) + '...' : hikaye,
+                  visibility: 'public'
+                }),
+                'https://sosyal.teknofest.app/api/v1/statuses'
+              ];
+              
+              const curl = spawn('curl', curlArgs);
+              let output = '';
+              
+              curl.stdout.on('data', (data) => {
+                output += data.toString();
+              });
+              
+              curl.on('close', (code) => {
+                console.log(`${index + 1}. hikaye yanıtı (${hikaye.length} karakter):`);
+                console.log(output.substring(0, 200) + (output.length > 200 ? '...' : ''));
+                
+                if (output.includes('"id"')) {
+                  console.log(`✅ ${index + 1}. hikaye başarılı`);
+                  resolve(true);
+                } else if (output.includes('<!DOCTYPE html>')) {
+                  console.log(`❌ ${index + 1}. hikaye - Cloudflare engeli`);
+                  resolve(false);
+                } else {
+                  console.log(`⚠️ ${index + 1}. hikaye - belirsiz durum`);
+                  resolve(false);
+                }
+              });
+              
+              curl.on('error', reject);
+            });
+          }
           
-          const Mastodon = require('mastodon-api');
-          const mastodon = new Mastodon({
-            access_token: process.env.MASTODON_TOKEN,
-            api_url: 'https://sosyal.teknofest.app/api/v1/',
-            timeout_ms: 60 * 1000,
-            user_agent: 'MastodonBot/1.0.0 (Node.js; +https://github.com/terikisi/mastodon-bot)'
-          });
-          
-          // 5 rastgele hikaye seç
-          const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 5);
+          // 3 rastgele hikaye seç ve paylaş
+          const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 3);
           
           async function paylas() {
-            let basariliPaylasmlar = 0;
+            let basarili = 0;
             
             for (let i = 0; i < secilenHikayeler.length; i++) {
-              const hikaye = secilenHikayeler[i];
+              const result = await curlPost(secilenHikayeler[i], i);
+              if (result) basarili++;
               
-              if (hikaye.length > 0) {
-                try {
-                  console.log(`${i + 1}. hikaye paylaşılıyor...`);
-                  console.log(`İçerik uzunluğu: ${hikaye.length} karakter`);
-                  
-                  // Mastodon karakter sınırını kontrol et (500 karakter)
-                  const paylasilacakHikaye = hikaye.length > 480 ? 
-                    hikaye.substring(0, 477) + '...' : hikaye;
-                  
-                  const resp = await mastodon.post('statuses', { 
-                    status: paylasilacakHikaye,
-                    visibility: 'public'
-                  });
-                  
-                  // Detaylı yanıt logla
-                  console.log('API Yanıt Detayları:');
-                  console.log('Response tipi:', typeof resp);
-                  console.log('Response.data tipi:', typeof resp.data);
-                  console.log('Status Code:', resp.resp?.statusCode || 'Bilinmiyor');
-                  console.log('Ham Response (ilk 300 karakter):');
-                  console.log(JSON.stringify(resp, null, 2).substring(0, 300) + '...');
-                  
-                  // Farklı veri yapıları için ID'yi bul
-                  let postData = resp.data || resp;
-                  let postId = postData.id || postData.uri?.split('/').pop();
-                  
-                  if (postId) {
-                    const postUrl = `https://sosyal.teknofest.app/@terikisi/${postId}`;
-                    console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${postUrl}`);
-                  } else {
-                    console.log(`✓ ${i + 1}. hikaye paylaşıldı ama ID bulunamadı`);
-                    console.log('Mevcut post data:', JSON.stringify(postData));
-                  }
-                  basariliPaylasmlar++;
-                  
-                  // Paylaşımlar arasında 3 saniye bekle
-                  if (i < secilenHikayeler.length - 1) {
-                    console.log('3 saniye bekleniyor...');
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                  }
-                  
-                } catch (err) {
-                  console.error(`✗ ${i + 1}. hikaye paylaşılırken hata oluştu:`);
-                  console.error('Hata detayı:', err.message);
-                  if (err.response && err.response.data) {
-                    console.error('API yanıtı:', JSON.stringify(err.response.data, null, 2));
-                  }
-                }
+              // 2 saniye bekle
+              if (i < secilenHikayeler.length - 1) {
+                await new Promise(resolve => setTimeout(resolve, 2000));
               }
             }
             
-            console.log(`\n=== ÖZET ===`);
-            console.log(`Toplam paylaşım denemesi: ${secilenHikayeler.length}`);
-            console.log(`Başarılı paylaşım: ${basariliPaylasmlar}`);
-            console.log(`Başarısız paylaşım: ${secilenHikayeler.length - basariliPaylasmlar}`);
+            console.log(`\n=== SONUÇ ===`);
+            console.log(`Toplam: ${secilenHikayeler.length}, Başarılı: ${basarili}`);
           }
           
-          paylas().catch(err => {
-            console.error('Ana fonksiyonda hata:', err);
-            process.exit(1);
-          });
+          paylas().catch(console.error);
           EOF
           
           node script.js
