@@ -1,0 +1,144 @@
+name: Mastodon Otomatik Paylaşım
+on:
+  schedule:
+    - cron: '0 8 * * *'  # Her gün saat 8:00'de çalışır
+  workflow_dispatch:  # Manuel çalıştırma için
+
+jobs:
+  paylas:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Node.js Kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Gist'ten Dosyayı İndir
+        run: |
+          echo "Gist'ten hikayeler dosyası indiriliyor..."
+          curl -H "Authorization: token ${{ secrets.GIST_TOKEN }}" \
+               -H "Accept: application/vnd.github.v3+json" \
+               https://api.github.com/gists/fa7b2f4758251a7901a64d3715b171d7 \
+               -o gist.json
+          
+          echo "Gist yanıtı kontrol ediliyor..."
+          if [ ! -f "gist.json" ]; then
+            echo "Gist dosyası indirilemedi!"
+            exit 1
+          fi
+          
+          # JSON dosyasını kontrol et
+          cat gist.json
+          echo ""
+          echo "========================"
+          
+          # jq kurulu değilse kuralım
+          sudo apt-get update && sudo apt-get install -y jq
+          
+          # Gist içeriğini çıkar ve hikayeler.txt dosyasını oluştur
+          cat gist.json | jq -r '.files["hikayeler.txt"].content' > hikayeler.txt
+          
+          # Dosyanın indirilip indirilmediğini kontrol et
+          if [ ! -f "hikayeler.txt" ] || [ ! -s "hikayeler.txt" ]; then
+            echo "Hikayeler dosyası oluşturulamadı veya boş!"
+            echo "Gist içeriği:"
+            cat gist.json | jq '.files'
+            exit 1
+          fi
+          
+          echo "Hikayeler dosyası başarıyla indirildi:"
+          wc -l hikayeler.txt
+          echo "İlk 3 satır:"
+          head -3 hikayeler.txt
+          
+      - name: Paketleri Kur
+        run: npm install mastodon-api
+        
+      - name: Paylaşımı Yap
+        run: |
+          cat << 'EOF' > script.js
+          const fs = require('fs');
+          const path = require('path');
+          
+          // Dosya varlığını kontrol et
+          const hikayelerPath = path.join(__dirname, 'hikayeler.txt');
+          if (!fs.existsSync(hikayelerPath)) {
+            console.error('hikayeler.txt dosyası bulunamadı!');
+            process.exit(1);
+          }
+          
+          const hikayeler = fs.readFileSync(hikayelerPath, 'utf8')
+                               .split('\n')
+                               .filter(line => line.trim() !== '')
+                               .filter(line => line.length > 10); // Çok kısa satırları filtrele
+          
+          if (hikayeler.length === 0) {
+            console.error('Geçerli hikaye bulunamadı!');
+            process.exit(1);
+          }
+          
+          console.log(`Toplam ${hikayeler.length} hikaye bulundu`);
+          
+          const Mastodon = require('mastodon-api');
+          const mastodon = new Mastodon({
+            access_token: process.env.MASTODON_TOKEN,
+            api_url: 'https://sosyal.teknofest.app/api/v1/'
+          });
+          
+          // 5 rastgele hikaye seç
+          const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 5);
+          
+          async function paylas() {
+            let basariliPaylasmlar = 0;
+            
+            for (let i = 0; i < secilenHikayeler.length; i++) {
+              const hikaye = secilenHikayeler[i];
+              
+              if (hikaye.length > 0) {
+                try {
+                  console.log(`${i + 1}. hikaye paylaşılıyor...`);
+                  console.log(`İçerik uzunluğu: ${hikaye.length} karakter`);
+                  
+                  // Mastodon karakter sınırını kontrol et (500 karakter)
+                  const paylasilacakHikaye = hikaye.length > 480 ? 
+                    hikaye.substring(0, 477) + '...' : hikaye;
+                  
+                  const resp = await mastodon.post('statuses', { 
+                    status: paylasilacakHikaye,
+                    visibility: 'public'
+                  });
+                  
+                  console.log(`✓ ${i + 1}. hikaye başarıyla paylaşıldı: ${resp.data.url || 'URL alınamadı'}`);
+                  basariliPaylasmlar++;
+                  
+                  // Paylaşımlar arasında 3 saniye bekle
+                  if (i < secilenHikayeler.length - 1) {
+                    console.log('3 saniye bekleniyor...');
+                    await new Promise(resolve => setTimeout(resolve, 3000));
+                  }
+                  
+                } catch (err) {
+                  console.error(`✗ ${i + 1}. hikaye paylaşılırken hata oluştu:`);
+                  console.error('Hata detayı:', err.message);
+                  if (err.response && err.response.data) {
+                    console.error('API yanıtı:', JSON.stringify(err.response.data, null, 2));
+                  }
+                }
+              }
+            }
+            
+            console.log(`\n=== ÖZET ===`);
+            console.log(`Toplam paylaşım denemesi: ${secilenHikayeler.length}`);
+            console.log(`Başarılı paylaşım: ${basariliPaylasmlar}`);
+            console.log(`Başarısız paylaşım: ${secilenHikayeler.length - basariliPaylasmlar}`);
+          }
+          
+          paylas().catch(err => {
+            console.error('Ana fonksiyonda hata:', err);
+            process.exit(1);
+          });
+          EOF
+          
+          node script.js
+        env:
+          MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
