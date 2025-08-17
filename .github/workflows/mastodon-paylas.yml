@@ -1,4 +1,5 @@
-name: Mastodon OAuth Akışı ile Paylaşım
+name: Mastodon Otomatik Paylaşım
+
 on:
   schedule:
     - cron: '0 8 * * *'
@@ -8,11 +9,6 @@ jobs:
   paylas:
     runs-on: ubuntu-latest
     steps:
-      - name: Node.js Kur
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-          
       - name: Gist'ten Dosyayı İndir
         run: |
           echo "Gist'ten hikayeler dosyası indiriliyor..."
@@ -21,9 +17,11 @@ jobs:
                https://api.github.com/gists/fa7b2f4758251a7901a64d3715b171d7 \
                -o gist.json
           
+          # jq aracı ile JSON dosyasından hikayeler.txt içeriğini ayıkla
           sudo apt-get update && sudo apt-get install -y jq
           cat gist.json | jq -r '.files["hikayeler.txt"].content' > hikayeler.txt
           
+          # Dosyanın boş olup olmadığını kontrol et
           if [ ! -s "hikayeler.txt" ]; then
             echo "Hikayeler dosyası boş!"
             exit 1
@@ -31,244 +29,55 @@ jobs:
           
           echo "✅ $(wc -l < hikayeler.txt) hikaye indirildi"
 
-      - name: Mastodon OAuth ve Paylaşım
+      - name: Node.js Kur
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Paketleri Kur
+        run: npm install mastodon-api
+
+      - name: Mastodon'da Paylaşım Yap
         run: |
-          npm install axios
-          
-          cat << 'EOF' > mastodon-oauth.js
-          const axios = require('axios');
+          cat << 'EOF' > mastodon-paylas.js
           const fs = require('fs');
-          
-          const MASTODON_HOST = 'https://sosyal.teknofest.app';
-          const CLIENT_NAME = 'GitHub Actions Bot';
-          
-          class MastodonOAuth {
-            constructor() {
-              this.host = MASTODON_HOST;
-              this.clientId = null;
-              this.clientSecret = null;
-              this.accessToken = process.env.MASTODON_TOKEN;
-            }
-            
-            async registerApp() {
-              console.log('📱 Yeni uygulama kaydediliyor...');
-              
-              try {
-                const response = await axios.post(`${this.host}/api/v1/apps`, {
-                  client_name: CLIENT_NAME,
-                  redirect_uris: 'urn:ietf:wg:oauth:2.0:oob', // OAuth out-of-band
-                  scopes: 'read write:statuses',
-                  website: 'https://github.com'
-                }, {
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'GitHubActionsBot/1.0'
-                  },
-                  timeout: 15000
-                });
-                
-                console.log('✅ Uygulama başarıyla kaydedildi');
-                console.log('Client ID:', response.data.client_id?.substring(0, 8) + '...');
-                
-                this.clientId = response.data.client_id;
-                this.clientSecret = response.data.client_secret;
-                
-                return response.data;
-                
-              } catch (error) {
-                console.error('❌ Uygulama kaydı başarısız:', error.response?.data || error.message);
-                throw error;
-              }
-            }
-            
-            async getClientToken() {
-              console.log('🔑 Client token alınıyor...');
-              
-              try {
-                const response = await axios.post(`${this.host}/oauth/token`, {
-                  client_id: this.clientId,
-                  client_secret: this.clientSecret,
-                  grant_type: 'client_credentials',
-                  redirect_uri: 'urn:ietf:wg:oauth:2.0:oob'
-                }, {
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'GitHubActionsBot/1.0'
-                  }
-                });
-                
-                console.log('✅ Client token alındı');
-                return response.data.access_token;
-                
-              } catch (error) {
-                console.error('❌ Client token alımı başarısız:', error.response?.data || error.message);
-                throw error;
-              }
-            }
-            
-            async verifyAppCredentials(token) {
-              console.log('🔍 App credentials doğrulanıyor...');
-              
-              try {
-                const response = await axios.get(`${this.host}/api/v1/apps/verify_credentials`, {
-                  headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'User-Agent': 'GitHubActionsBot/1.0'
-                  }
-                });
-                
-                console.log('✅ App credentials geçerli');
-                console.log('App name:', response.data.name);
-                return true;
-                
-              } catch (error) {
-                console.error('❌ App credentials geçersiz:', error.response?.status, error.response?.data?.error);
-                return false;
-              }
-            }
-            
-            async verifyUserCredentials() {
-              console.log('👤 User credentials doğrulanıyor...');
-              
-              try {
-                const response = await axios.get(`${this.host}/api/v1/accounts/verify_credentials`, {
-                  headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
-                    'User-Agent': 'GitHubActionsBot/1.0'
-                  }
-                });
-                
-                console.log('✅ User credentials geçerli');
-                console.log('Username:', response.data.username || response.data.acct);
-                console.log('Display name:', response.data.display_name);
-                console.log('Posts count:', response.data.statuses_count);
-                
-                return response.data;
-                
-              } catch (error) {
-                console.error('❌ User credentials geçersiz:', error.response?.status);
-                if (error.response?.data) {
-                  console.error('Error data:', error.response.data);
-                }
-                return null;
-              }
-            }
-            
-            async postStatus(content) {
-              console.log(`📝 Paylaşım yapılıyor... (${content.length} karakter)`);
-              
-              try {
-                const response = await axios.post(`${this.host}/api/v1/statuses`, {
-                  status: content.length > 480 ? content.substring(0, 477) + '...' : content,
-                  visibility: 'public'
-                }, {
-                  headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'GitHubActionsBot/1.0'
-                  }
-                });
-                
-                console.log('✅ Paylaşım başarılı!');
-                if (response.data.id) {
-                  console.log('Post ID:', response.data.id);
-                  console.log('URL:', response.data.url || `${this.host}/@terikisi/${response.data.id}`);
-                }
-                
-                return response.data;
-                
-              } catch (error) {
-                console.error('❌ Paylaşım başarısız:', error.response?.status);
-                if (error.response?.data) {
-                  console.error('Error details:', JSON.stringify(error.response.data, null, 2));
-                }
-                throw error;
-              }
-            }
-          }
-          
-          async function main() {
-            console.log('🚀 Mastodon OAuth akışı başlatılıyor...\n');
-            
-            const mastodon = new MastodonOAuth();
-            
-            try {
-              // 1. Önce mevcut token'ı test et
-              const userAccount = await mastodon.verifyUserCredentials();
-              
-              if (!userAccount) {
-                console.log('\n🔄 User token geçersiz, OAuth akışı başlatılıyor...');
-                
-                // 2. Yeni app kaydet
-                await mastodon.registerApp();
-                
-                // 3. Client token al
-                const clientToken = await mastodon.getClientToken();
-                
-                // 4. App credentials doğrula
-                await mastodon.verifyAppCredentials(clientToken);
-                
-                console.log('\n⚠️  Manuel user authorization gerekiyor!');
-                console.log('Lütfen şu adrese gidin ve GitHub Actions için yetkilendirin:');
-                console.log(`${mastodon.host}/oauth/authorize?client_id=${mastodon.clientId}&redirect_uri=urn:ietf:wg:oauth:2.0:oob&response_type=code&scope=read+write:statuses`);
-                console.log('\nAlınan authorization code ile yeni bir MASTODON_TOKEN oluşturun.');
-                
-                return;
-              }
-              
-              console.log('\n📚 Hikayeler yükleniyor...');
-              
-              // Hikayeler dosyasını oku
-              const hikayeler = fs.readFileSync('hikayeler.txt', 'utf8')
-                                 .split('\n')
-                                 .filter(line => line.trim() !== '')
-                                 .filter(line => line.length > 10);
-              
-              console.log(`📖 ${hikayeler.length} hikaye bulundu`);
-              
-              if (hikayeler.length === 0) {
-                console.error('❌ Geçerli hikaye bulunamadı!');
-                return;
-              }
-              
-              // 3 rastgele hikaye seç
-              const secilenHikayeler = hikayeler
-                .sort(() => 0.5 - Math.random())
-                .slice(0, 3);
-              
-              console.log(`\n🎯 ${secilenHikayeler.length} hikaye paylaşılacak\n`);
-              
-              let basarili = 0;
-              
-              for (let i = 0; i < secilenHikayeler.length; i++) {
+          const Mastodon = require('mastodon-api');
+
+          // Hikayeler dosyasını oku ve boş satırları filtrele
+          const hikayeler = fs.readFileSync('hikayeler.txt', 'utf8')
+                               .split('\n')
+                               .filter(line => line.trim() !== '');
+
+          // Mastodon API istemcisini mevcut erişim belirteci ile başlat
+          const mastodon = new Mastodon({
+            access_token: process.env.MASTODON_TOKEN,
+            api_url: 'https://sosyal.teknofest.app/api/v1/'
+          });
+
+          // Rastgele 3 hikaye seç
+          const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 3);
+
+          async function paylas() {
+            console.log(`\n🎯 ${secilenHikayeler.length} hikaye paylaşılacak`);
+            for (const hikaye of secilenHikayeler) {
+              if (hikaye.length > 0) {
                 try {
-                  console.log(`--- ${i + 1}. Hikaye ---`);
-                  await mastodon.postStatus(secilenHikayeler[i]);
-                  basarili++;
-                  
-                  if (i < secilenHikayeler.length - 1) {
-                    console.log('⏱️ 3 saniye bekleniyor...\n');
-                    await new Promise(resolve => setTimeout(resolve, 3000));
-                  }
-                  
-                } catch (error) {
-                  console.error(`❌ ${i + 1}. hikaye paylaşılamadı\n`);
+                  console.log(`\n📝 Paylaşım yapılıyor: "${hikaye.substring(0, 50)}..."`);
+                  const resp = await mastodon.post('statuses', { status: hikaye });
+                  console.log(`✅ Başarıyla paylaşıldı: ${resp.data.url}`);
+                  // Paylaşımlar arası 5 saniye bekle
+                  await new Promise(resolve => setTimeout(resolve, 5000));
+                } catch (err) {
+                  console.error('❌ Paylaşım başarısız:', err.response?.data || err.message);
                 }
               }
-              
-              console.log('\n📊 === SONUÇ ===');
-              console.log(`✅ Başarılı: ${basarili}/${secilenHikayeler.length}`);
-              console.log(`📈 Başarı oranı: ${Math.round((basarili / secilenHikayeler.length) * 100)}%`);
-              
-            } catch (error) {
-              console.error('💥 Genel hata:', error.message);
             }
           }
-          
-          main();
+
+          paylas();
           EOF
           
-          echo "🔐 OAuth tabanlı Mastodon paylaşımı başlatılıyor..."
-          node mastodon-oauth.js
+          echo "🚀 Mastodon paylaşım botu başlatılıyor..."
+          node mastodon-paylas.js
         env:
           MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
