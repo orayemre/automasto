@@ -70,7 +70,7 @@ jobs:
                   // URL'yi doğrudan yanıttan al veya manuel oluştur
                   let postUrl = resp?.data?.url;
                   if (!postUrl && resp?.data?.id) {
-                     postUrl = `https://sosyal.teknofest.app/@terikisi/${resp.data.id}`;
+                     postUrl = `https://sosyal.teknofest.app/@mukavemet/${resp.data.id}`;
                   }
                   
                   if (postUrl) {
