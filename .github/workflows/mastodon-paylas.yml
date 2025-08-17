@@ -13,6 +13,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: 'orayemre/fa7b2f4758251a7901a64d3715b171d7'
+          # Gist'ler için özel ayarlar
+          ref: 'main'
+          fetch-depth: 1
 
       - name: Node.js Kur
         uses: actions/setup-node@v4
@@ -46,7 +49,6 @@ jobs:
                 try {
                   const resp = await mastodon.post('statuses', { status: hikaye });
                   console.log(`Başarıyla paylaşıldı: ${resp.data.url}`);
-                  // Paylaşımlar arası 2 saniye bekle
                   await new Promise(resolve => setTimeout(resolve, 2000));
                 } catch (err) {
                   console.error('Hata oluştu:', err);
