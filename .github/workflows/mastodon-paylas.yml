@@ -3,26 +3,28 @@ name: Mastodon Otomatik Paylaşım
 on:
   schedule:
     - cron: '0 8 * * *'
+  workflow_dispatch:
 
 jobs:
   paylas:
     runs-on: ubuntu-latest
     steps:
       - name: Gist'i İndir
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: 'orayemre/fa7b2f4758251a7901a64d3715b171d7'
 
       - name: Node.js Kur
-        uses: actions/setup-node@v2
+        uses: actions/setup-node@v4
         with:
-          node-version: '16'
+          node-version: '18'
 
       - name: Paketleri Kur
         run: npm install mastodon-api
 
       - name: Paylaşımı Yap
         run: |
+          cat << 'EOF' > script.js
           const fs = require('fs');
           const path = require('path');
           
@@ -38,16 +40,24 @@ jobs:
 
           const secilenHikayeler = hikayeler.sort(() => 0.5 - Math.random()).slice(0, 5);
 
-          secilenHikayeler.forEach(hikaye => {
-            if (hikaye.length > 0) {
-              mastodon.post('statuses', { status: hikaye })
-                .then(resp => {
+          async function paylas() {
+            for (const hikaye of secilenHikayeler) {
+              if (hikaye.length > 0) {
+                try {
+                  const resp = await mastodon.post('statuses', { status: hikaye });
                   console.log(`Başarıyla paylaşıldı: ${resp.data.url}`);
-                })
-                .catch(err => {
+                  // Paylaşımlar arası 2 saniye bekle
+                  await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch (err) {
                   console.error('Hata oluştu:', err);
-                });
+                }
+              }
             }
-          });
+          }
+
+          paylas();
+          EOF
+          
+          node script.js
         env:
           MASTODON_TOKEN: ${{ secrets.MASTODON_TOKEN }}
