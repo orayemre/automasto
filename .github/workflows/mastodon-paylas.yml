@@ -12,8 +12,7 @@ jobs:
       - name: Gist'i İndir
         uses: actions/checkout@v4
         with:
-          repository: 'orayemre/fa7b2f4758251a7901a64d3715b171d7'
-          # Gist'ler için özel ayarlar
+          repository: 'https://gist.github.com/orayemre/fa7b2f4758251a7901a64d3715b171d7'
           ref: 'main'
           fetch-depth: 1
 
