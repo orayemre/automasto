@@ -72,7 +72,9 @@ jobs:
           echo ""
           echo "4. Instance bilgisi:"
           curl -H "User-Agent: MastodonBot/1.0" "https://sosyal.teknofest.app/api/v1/instance" 2>/dev/null | head -10
-        run: |
+          
+          echo ""
+          echo "========================"
           echo "Curl ile Mastodon API testi..."
           
           # Hesap bilgilerini kontrol et
