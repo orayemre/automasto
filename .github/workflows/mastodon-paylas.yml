@@ -64,7 +64,11 @@ jobs:
                 try {
                   console.log(`\n📝 Paylaşım yapılıyor: "${hikaye.substring(0, 50)}..."`);
                   const resp = await mastodon.post('statuses', { status: hikaye });
-                  console.log(`✅ Başarıyla paylaşıldı: ${resp.data.url}`);
+                  
+                  // URL'yi post ID'sinden manuel olarak oluştur
+                  const postUrl = resp.data.url || `https://sosyal.teknofest.app/@terikisi/${resp.data.id}`;
+                  
+                  console.log(`✅ Başarıyla paylaşıldı: ${postUrl}`);
                   // Paylaşımlar arası 5 saniye bekle
                   await new Promise(resolve => setTimeout(resolve, 5000));
                 } catch (err) {
